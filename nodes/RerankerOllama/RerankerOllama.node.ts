@@ -49,7 +49,7 @@ export class RerankerOllama implements INodeType {
 		outputNames: ['Reranker'],
 		properties: [
 			{
-				displayName: 'Model',
+				displayName: 'Model Name or ID',
 				name: 'model',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getModels' },
