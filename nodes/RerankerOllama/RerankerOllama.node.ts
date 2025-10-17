@@ -70,30 +70,76 @@ export class RerankerOllama implements INodeType {
 
 	methods = {
 		loadOptions: {
+			/**
+			 * Dynamically load all available Ollama models.
+			 */
 			async getModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				// --- 1️⃣ Get credentials ---
 				const credentials = (await this.getCredentials('ollamaApi')) as {
 					baseUrl: string;
 					apiKey?: string;
 				};
-				const baseUrl = (credentials.baseUrl || '').replace(/\/+$/, '');
-				const resp = await fetch(`${baseUrl}/models`, {
-					method: 'GET',
-					headers: {
-						'Content-Type': 'application/json',
-						...(credentials.apiKey ? { Authorization: `Bearer ${credentials.apiKey}` } : {}),
-					},
-				});
 
-				if (!resp.ok) {
+				const baseUrl = (credentials.baseUrl || '').replace(/\/+$/, '') || 'http://localhost:11434';
+
+				// --- 2️⃣ Fetch models from Ollama API ---
+				let response: Response;
+				try {
+					response = await fetch(`${baseUrl}/api/tags`, {
+						method: 'GET',
+						headers: {
+							'Content-Type': 'application/json',
+							...(credentials.apiKey ? { Authorization: `Bearer ${credentials.apiKey}` } : {}),
+						},
+					});
+				} catch (error) {
 					throw new NodeOperationError(
 						this.getNode(),
-						`Failed to fetch models: ${resp.status} ${resp.statusText}`,
-						{ itemIndex: 0 },
+						`Network error connecting to Ollama at ${baseUrl}: ${(error as Error).message}`,
 					);
 				}
 
-				const result = (await resp.json()) as { data?: Array<{ id: string }> };
-				return (result.data ?? []).map((m) => ({ name: m.id, value: m.id }));
+				if (!response.ok) {
+					throw new NodeOperationError(
+						this.getNode(),
+						`Failed to fetch Ollama models (${response.status} ${response.statusText}) from ${baseUrl}`,
+					);
+				}
+
+				// --- 3️⃣ Parse and validate response ---
+				const data = (await response.json()) as {
+					models?: Array<{
+						name: string;
+						size?: number;
+						modified_at?: string;
+					}>;
+				};
+
+				if (!data.models || !Array.isArray(data.models)) {
+					throw new NodeOperationError(
+						this.getNode(),
+						'Unexpected response: missing "models" array from Ollama API.',
+					);
+				}
+
+				// --- 4️⃣ Map to n8n-compatible options ---
+				const options: INodePropertyOptions[] = data.models.map((model) => {
+					const sizeGB = model.size
+						? (model.size / 1_073_741_824).toFixed(1) + ' GB'
+						: 'Unknown size';
+					const modified = model.modified_at
+						? new Date(model.modified_at).toLocaleString()
+						: 'Unknown date';
+
+					return {
+						name: `${model.name} (${sizeGB})`,
+						value: model.name,
+						description: `Last updated: ${modified}`,
+					};
+				});
+
+				// --- 5️⃣ Return options ---
+				return options;
 			},
 		},
 	};
