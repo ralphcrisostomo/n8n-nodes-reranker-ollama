@@ -1,0 +1,62 @@
+{
+	"name": "n8n-nodes-reranker-ollama",
+	"version": "0.0.1",
+	"description": "Use Ollama Reranker to reorder documents after retrieval from a vector store by relevance to the given query.",
+	"keywords": [
+		"n8n-community-node-package",
+		"n8n",
+		"workflow",
+		"reranker",
+		"ollama",
+		"vector store"
+	],
+	"license": "MIT",
+	"homepage": "https://github.com/ralphcrisostomo/n8n-nodes-reranker-ollama",
+	"author": {
+		"name": "Ralf Crisostomo",
+		"email": "rrecrisostomo@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ralphcrisostomo/n8n-nodes-reranker-ollama.git"
+	},
+	"engines": {
+		"node": ">=20.15"
+	},
+	"main": "index.js",
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"pretty": "prettier --write --list-different .",
+		"build": "npx rimraf dist && tsc && gulp build:icons",
+		"dev": "tsc --watch",
+		"format": "prettier nodes credentials --write",
+		"lint": "eslint nodes credentials package.json",
+		"lintfix": "eslint nodes credentials package.json --fix",
+		"prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes credentials package.json"
+	},
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"credentials": [],
+		"nodes": [
+			"dist/nodes/RerankerOllama/RerankerOllama.node.js"
+		]
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	},
+	"dependencies": {
+		"@langchain/openai": "^0.6.14",
+		"rimraf": "^6.0.1"
+	},
+	"devDependencies": {
+		"@types/node": "^20.11.30",
+		"@typescript-eslint/parser": "~8.32.0",
+		"eslint": "^8.57.0",
+		"eslint-plugin-n8n-nodes-base": "^1.16.3",
+		"gulp": "^5.0.0",
+		"prettier": "^3.5.3",
+		"typescript": "^5.8.2"
+	}
+}
