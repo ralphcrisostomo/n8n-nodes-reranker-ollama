@@ -62,9 +62,3 @@ If you’d like to see support for another **reranker model**, please:
 
 - Open a **GitHub issue**, or
 - Submit a **pull request** with your proposed model configuration.
-
----
-
-## 📜 License
-
-[MIT](LICENSE)
