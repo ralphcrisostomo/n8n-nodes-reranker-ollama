@@ -53,7 +53,7 @@ export class RerankerOllama implements INodeType {
 				name: 'model',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getModels' },
-				default: 'dengcao/Qwen3-Reranker-8B:Q3_K_M',
+				default: 'dengcao/Qwen3-Reranker-4B:Q5_K_M',
 				description:
 					'The model that should be used to rerank the documents. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 				required: true,
@@ -138,8 +138,12 @@ export class RerankerOllama implements INodeType {
 					};
 				});
 
-				// --- 5️⃣ Return options ---
-				return options;
+				const whitelist = ['qwen3-reranker'];
+
+				return options.filter((option: any) => {
+					const value = option.value?.toLowerCase?.() || '';
+					return whitelist.some((allowed) => value.includes(allowed));
+				});
 			},
 		},
 	};
@@ -147,75 +151,67 @@ export class RerankerOllama implements INodeType {
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		this.logger.debug('Supply data for reranking Ollama');
 
-		const rerank = async (documents: any, query: any) => {
-			const credentials = (await this.getCredentials('rerankerOllamaApi')) as {
+		// Note: This logic is based on https://apidog.com/blog/qwen-3-embedding-reranker-ollama/
+		const rerankQwen = async (documents: any[], query: string) => {
+			const credentials = (await this.getCredentials('ollamaApi')) as {
 				baseUrl: string;
 				apiKey?: string;
 			};
+
 			const model = this.getNodeParameter('model', itemIndex) as string;
 			const topN = this.getNodeParameter('topN', itemIndex) as number;
+
 			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 			if (credentials.apiKey) headers.Authorization = `Bearer ${credentials.apiKey}`;
 
 			const baseUrl = (credentials.baseUrl || 'http://localhost:11434').replace(/\/+$/, '');
-			const url = `${baseUrl}/api/generate`;
+			const url = `${baseUrl}/api/chat`;
 
-			// Build ranking prompt
-			const passagesText = documents
-				.map((doc: any, i: any) => `Document ${i + 1}: ${doc.pageContent}`)
-				.join('\n\n');
+			// Run reranker for each document
+			const rerankCall = documents.map(async (doc: any, index: number) => {
+				const messages = [
+					{
+						role: 'user',
+						content: `You are an expert relevance grader. For each document, determine whether it is relevant to the query. Respond with a simple 'Yes' or 'No'.\n\n Query: "${query}"\nDocument: ${doc.pageContent}`,
+					},
+				];
 
-			const prompt = `
-				You are a reranker model. Rank the following documents by relevance to the query.
+				const payload = {
+					model,
+					messages,
+					options: {
+						temperature: 0.0,
+						num_predict: 200,
+					},
+					stream: false,
+				};
+				const response = (await this.helpers.httpRequest({
+					method: 'POST',
+					url,
+					headers,
+					body: JSON.stringify(payload),
+				})) as any;
 
-				Query: "${query}"
+				const answer = response?.message?.content?.trim()?.toLowerCase();
+				return {
+					index,
+					relevanceScore: answer?.includes('yes') ? 1 : 0,
+				};
+			});
 
-				Documents:
-				${passagesText}
+			const results = await Promise.all(rerankCall);
 
-				Return a JSON array of objects: [{"index": number, "score": number}] with highest scores first.
-			`;
+			console.log(JSON.stringify({ results }, null, 2));
 
-			const payload = { model, prompt, stream: false };
-
-			console.log(JSON.stringify({ url }, null, 2));
-			console.log(JSON.stringify({ headers }, null, 2));
-			console.log(JSON.stringify({ payload }, null, 2));
-
-			const response = (await this.helpers.httpRequest({
-				method: 'POST',
-				url,
-				headers,
-				body: JSON.stringify(payload),
-			})) as any;
-
-			// Ollama returns a text completion; extract JSON
-			const text = response.response || response.output || response;
-			const jsonMatch = text.match(/\[[\s\S]*\]/);
-			if (!jsonMatch)
-				throw new NodeOperationError(this.getNode(), 'Failed to parse reranker output.', {
-					itemIndex,
-				});
-
-			let results = [];
-			try {
-				results = JSON.parse(jsonMatch[0]);
-			} catch {
-				throw new NodeOperationError(this.getNode(), 'Invalid JSON in reranker response.', {
-					itemIndex,
-				});
-			}
-
-			const rankings = results.slice(0, Math.min(topN, results.length));
-			return rankings.map((r: any) => ({
-				index: r.index - 1,
-				relevanceScore: r.score,
-			}));
+			// Sort descending by relevance and limit topN
+			const sorted = results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+			return sorted.slice(0, Math.min(topN, sorted.length));
 		};
 
 		const compressDocuments = async (documents: any[], query: string) => {
 			if (!documents?.length) return [];
-			const results = await rerank(documents, query);
+			// Note: Currently only supports Qwen3-Reranker!
+			const results = await rerankQwen(documents, query);
 			const finalResults = results.map((result: any) => {
 				const doc = documents[result.index];
 				doc.metadata = doc.metadata || {};
